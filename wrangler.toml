@@ -1,0 +1,12 @@
+name = "readwise-audio"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV Namespace binding - you'll create this and add the ID
+[[kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# Secrets (add via `wrangler secret put` - don't put actual values here!)
+# READWISE_TOKEN - your Readwise Reader access token
+# CLAUDE_API_KEY - your Anthropic API key
