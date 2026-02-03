@@ -1,11 +1,12 @@
 name = "readwise-audio"
 main = "worker.js"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 # KV Namespace binding - you'll create this and add the ID
 [[kv_namespaces]]
 binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "71a4d1e50d8c4e9b953e655233fbec83"
 
 # Secrets (add via `wrangler secret put` - don't put actual values here!)
 # READWISE_TOKEN - your Readwise Reader access token
