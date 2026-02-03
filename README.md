@@ -32,7 +32,7 @@ This opens a browser to authenticate.
 ### 3. Create KV Namespace
 
 ```bash
-wrangler kv:namespace create "KV"
+wrangler kv namespace create "KV"
 ```
 
 This outputs something like:
