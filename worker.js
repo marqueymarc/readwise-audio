@@ -208,74 +208,95 @@ async function handleLater(request, env, corsHeaders) {
 // ============ READWISE API ============
 
 async function fetchAllReadwiseArticles(env, locationFilter) {
-  const allArticles = [];
-  let nextCursor = null;
-  let pageCount = 0;
-  const maxPages = 10;
+  const articlesMap = new Map();
 
-  do {
-    // Rate limiting delay between pages
-    if (pageCount > 0) await new Promise(r => setTimeout(r, 1000));
+  // Determine which Readwise locations to fetch based on our app's view filter
+  let targetLocations = [];
+  if (locationFilter === 'feed') {
+    targetLocations = ['feed'];
+  } else if (locationFilter === 'library') {
+    targetLocations = ['new', 'later', 'shortlist'];
+  } else {
+    // 'all' or default
+    targetLocations = ['new', 'later', 'shortlist', 'feed'];
+  }
 
-    const url = new URL('https://readwise.io/api/v3/list/');
-    if (nextCursor) url.searchParams.set('pageCursor', nextCursor);
+  // Helper to fetch a single location with pagination
+  const fetchLocation = async (loc) => {
+    let nextCursor = null;
+    let fetchedCount = 0;
+    const MAX_PER_LOC = 20; // Limit per location to prevent timeout
 
-    // We fetch globally and filter client-side to ensure we get 'new' AND 'feed' for the Feed view,
-    // and 'later' AND 'shortlist' for the Library view.
-    // Strict client-side filtering + sorting handles the presentation.
+    while (fetchedCount < MAX_PER_LOC) {
+      if (fetchedCount > 0 && !nextCursor) break;
 
-    let response;
-    let retries = 3;
-    while (retries > 0) {
-      response = await fetch(url.toString(), {
-        headers: {
-          'Authorization': `Token ${env.READWISE_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
+      const url = new URL('https://readwise.io/api/v3/list/');
+      url.searchParams.set('location', loc);
+      if (nextCursor) url.searchParams.set('pageCursor', nextCursor);
+
+      let response;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          response = await fetch(url.toString(), {
+            headers: {
+              'Authorization': `Token ${env.READWISE_TOKEN}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (response.status === 429) {
+            const retryAfter = parseInt(response.headers.get('Retry-After') || '5', 10);
+            console.log(`[DEBUG] 429 Rate Limit on ${loc}. Waiting ${retryAfter}s...`);
+            await new Promise(r => setTimeout(r, retryAfter * 1000));
+            retries--;
+            continue;
+          }
+
+          if (!response.ok) throw new Error(`Readwise API error: ${response.status}`);
+          break; // Success
+        } catch (e) {
+          retries--;
+          if (retries === 0) {
+            console.error(`[ERROR] Failed to fetch ${loc}:`, e);
+            return; // Skip this location if it fails repeatedly
+          }
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      const data = await response.json();
+
+      // Process results
+      (data.results || []).forEach(doc => {
+        // Basic validation
+        if (doc.category !== 'article' && doc.location !== 'feed') return; // Keep articles and feed items
+        if (doc.location === 'archive') return;
+
+        // Use ID as key for deduplication
+        if (!articlesMap.has(doc.id)) {
+          articlesMap.set(doc.id, doc);
+        }
       });
 
-      if (response.status === 429) {
-        const resetTime = parseInt(response.headers.get('Retry-After')) || 5;
-        console.log(`Rate limited. Waiting ${resetTime}s...`);
-        await new Promise(r => setTimeout(r, resetTime * 1000));
-        retries--;
-        continue;
-      }
-      break;
+      nextCursor = data.nextPageCursor;
+      fetchedCount += (data.results || []).length;
+
+      // Gentle pacing
+      await new Promise(r => setTimeout(r, 200));
     }
+  };
 
-    if (!response.ok) throw new Error(`Readwise API error: ${response.status}`);
+  // Run fetches in parallel
+  await Promise.all(targetLocations.map(loc => fetchLocation(loc)));
 
-    const data = await response.json();
-
-    // Client-side cleanup and strict verification
-    const articles = (data.results || []).filter(doc => {
-      if (doc.category !== 'article') return false;
-      if (doc.location === 'archive') return false;
-
-      const loc = (doc.location || '').toLowerCase();
-
-      if (locationFilter === 'feed') {
-        // Feed = RSS/Newsletters only
-        return loc === 'feed';
-      } else if (locationFilter === 'library') {
-        // Library = Inbox (new), Later, and Shortlist
-        return loc === 'new' || loc === 'later' || loc === 'shortlist';
-      }
-      return true;
-    });
-
-    allArticles.push(...articles);
-    nextCursor = data.nextPageCursor;
-    pageCount++;
-
-    if (allArticles.length >= MAX_ARTICLES || pageCount >= maxPages) break;
-  } while (nextCursor);
-
-  // Strict Sort: Recent -> Old
-  allArticles.sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
-
-  return allArticles;
+  // Convert map to array and sort
+  // STRICT SORT: Recent first (by saved_at or published_date)
+  return Array.from(articlesMap.values()).sort((a, b) => {
+    const dateA = new Date(a.saved_at || a.published_date || 0);
+    const dateB = new Date(b.saved_at || b.published_date || 0);
+    return dateB - dateA; // Descending
+  });
 }
 
 async function updateReadwiseDocument(id, updates, env) {
