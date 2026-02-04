@@ -109,7 +109,8 @@ async function handleFeed(request, env, corsHeaders) {
         summary: summary,
         content: article.content || article.html || article.text || '',
         url: article.url,
-        readwise_url: article.source_url || `https://readwise.io/reader/document/${article.id}`,
+        readwise_url: `https://readwise.io/reader/document/${article.id}`,
+        original_url: article.source_url || article.url,
         word_count: (article.content || '').split(/\s+/).length,
         location: article.location,
       });
@@ -209,21 +210,41 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
   const maxPages = 10;
 
   do {
+    // Rate limiting delay between pages
+    if (pageCount > 0) await new Promise(r => setTimeout(r, 1000));
+
     const url = new URL('https://readwise.io/api/v3/list/');
     if (nextCursor) url.searchParams.set('pageCursor', nextCursor);
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        'Authorization': `Token ${env.READWISE_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    // We fetch globally and filter client-side to ensure we get 'new' AND 'feed' for the Feed view,
+    // and 'later' AND 'shortlist' for the Library view.
+    // Strict client-side filtering + sorting handles the presentation.
+
+    let response;
+    let retries = 3;
+    while (retries > 0) {
+      response = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `Token ${env.READWISE_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 429) {
+        const resetTime = parseInt(response.headers.get('Retry-After')) || 5;
+        console.log(`Rate limited. Waiting ${resetTime}s...`);
+        await new Promise(r => setTimeout(r, resetTime * 1000));
+        retries--;
+        continue;
+      }
+      break;
+    }
 
     if (!response.ok) throw new Error(`Readwise API error: ${response.status}`);
 
     const data = await response.json();
 
-    // Filter based on location preference
+    // Client-side cleanup and strict verification
     const articles = (data.results || []).filter(doc => {
       if (doc.category !== 'article') return false;
       if (doc.location === 'archive') return false;
@@ -233,7 +254,6 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
       } else if (locationFilter === 'library') {
         return doc.location === 'later' || doc.location === 'shortlist';
       }
-      // 'all' - include everything except archived
       return true;
     });
 
@@ -243,6 +263,9 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
 
     if (allArticles.length >= MAX_ARTICLES || pageCount >= maxPages) break;
   } while (nextCursor);
+
+  // Strict Sort: Recent -> Old
+  allArticles.sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
 
   return allArticles;
 }
@@ -466,7 +489,7 @@ function getHTMLContent() {
     .control-btn.primary { width: 68px; height: 68px; background: #e94560; color: #fff; font-size: 26px; }
 
     /* Actions */
-    .actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
+    .actions { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 16px; }
     .action-btn {
       padding: 12px 4px; border-radius: 12px; border: none;
       background: #fff; color: #1a1a2e; font-size: 10px; font-weight: 500;
@@ -633,8 +656,11 @@ function getHTMLContent() {
           <button class="action-btn readfull" onclick="readFullArticle()">
             <span class="icon">📖</span>Read Full
           </button>
-          <button class="action-btn open" onclick="openArticle()">
-            <span class="icon">🌐</span>Open
+          <button class="action-btn open" onclick="openOriginal()">
+            <span class="icon">🌐</span>Original
+          </button>
+          <button class="action-btn open" onclick="openReader()">
+            <span class="icon">📖</span>Reader
           </button>
         </div>
 
@@ -956,7 +982,7 @@ function getHTMLContent() {
 
     function readFullArticle() {
       const article = articles[currentIndex];
-      if (!article.content) { showToast('No content, opening...'); openArticle(); return; }
+      if (!article.content) { showToast('No content, opening Reader...'); openReader(); return; }
 
       // Stop any current summary playback
       stop();
@@ -1074,9 +1100,26 @@ function getHTMLContent() {
       }
     }
 
-    function openArticle() {
+    function openReader() {
       pause();
-      window.open(articles[currentIndex].readwise_url || articles[currentIndex].url, '_blank');
+      // Try deep link first, then fallback to HTTPS which is a Universal Link
+      // readwise://reader/document/{id}
+      const deepLink = 'readwise://reader/document/' + articles[currentIndex].id;
+      const universalLink = articles[currentIndex].readwise_url;
+      
+      // On iOS/Mobile, try deep link
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+          window.location.href = deepLink;
+          // Fallback if app not installed (simple timeout hack)
+          setTimeout(() => { window.open(universalLink, '_blank'); }, 500);
+      } else {
+          window.open(universalLink, '_blank');
+      }
+    }
+
+    function openOriginal() {
+      pause();
+      window.open(articles[currentIndex].original_url || articles[currentIndex].url, '_blank');
     }
 
     // ============ VOICE COMMANDS ============
@@ -1094,7 +1137,8 @@ function getHTMLContent() {
       if (cmd.includes('archive')) archiveArticle();
       else if (cmd.includes('delete') || cmd.includes('remove')) deleteArticle();
       else if (cmd.includes('later') || cmd.includes('save')) laterArticle();
-      else if (cmd.includes('open') || cmd.includes('browser')) openArticle();
+      else if (cmd.includes('open') || cmd.includes('browser')) openOriginal();
+      else if (cmd.includes('reader') || cmd.includes('app')) openReader();
       else if (cmd.includes('skip') || cmd.includes('next')) skipArticle();
       else if (cmd.includes('previous') || cmd.includes('back')) previousArticle();
       else if (cmd.includes('replay') || cmd.includes('again')) replay();
