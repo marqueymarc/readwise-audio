@@ -426,7 +426,10 @@ function getHTMLContent() {
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#f8f9fa">
   <title>Readwise Audio</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="180x180" href="data:image/png;base64,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">
   <link rel="manifest" href="/manifest.json">
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -689,7 +692,7 @@ function getHTMLContent() {
 
         <div class="voice-selector-container" style="margin-bottom: 16px;">
            <label style="display:block; font-size:12px; color:#666; margin-bottom:4px; text-align:center;">Voice</label>
-           <select id="voiceSelect" onchange="setVoice(this.value)" style="width:100%; padding:12px; border-radius:12px; border:1px solid #dee2e6; background:#fff; font-size:16px;">
+           <select id="voiceSelect" onchange="stop(); setVoice(this.value)" style="width:100%; padding:12px; border-radius:12px; border:1px solid #dee2e6; background:#fff; font-size:16px;">
              <option value="alloy">Alloy (Neutral)</option>
              <option value="echo">Echo (Male)</option>
              <option value="shimmer">Shimmer (Female)</option>
@@ -837,7 +840,31 @@ function getHTMLContent() {
         const data = await response.json();
         if (data.error) throw new Error(data.error);
 
-        articles = data.articles || [];
+        // Update cache: only add new, update existing, don't delete what we might need offline
+        const newArticles = data.articles || [];
+        const currentMap = new Map(articles.map(a => [a.id, a]));
+        
+        newArticles.forEach(a => {
+           // Preserve existing summary if server returned generic one or we want to save token cost
+           // Note: The server already checks cache, but let's be safe on client too
+           const existing = currentMap.get(a.id);
+           if (existing && existing.summary && !a.summary) {
+             a.summary = existing.summary;
+           }
+           currentMap.set(a.id, a);
+        });
+        
+        // Re-sort
+        articles = Array.from(currentMap.values()).sort((a,b) => {
+           const dateA = new Date(a.saved_at || a.published_date || 0);
+           const dateB = new Date(b.saved_at || b.published_date || 0);
+           return dateB - dateA;
+        });
+
+        // Filter by source again just in case
+        if (selectedSource === 'feed') articles = articles.filter(a => a.location === 'feed');
+        if (selectedSource === 'library') articles = articles.filter(a => a.location !== 'feed' && a.location !== 'archive');
+
         localStorage.setItem('articles', JSON.stringify(articles));
         currentIndex = 0;
         stop(); // Reset player
@@ -886,6 +913,7 @@ function getHTMLContent() {
 
     // ============ VOICE ============
     function setVoice(voice) {
+      stop(); // Stop before changing voice
       selectedVoice = voice;
       localStorage.setItem('voice', voice);
       showToast('Voice: ' + voice);
@@ -938,7 +966,18 @@ function getHTMLContent() {
     }
 
     // ============ PLAYBACK ============
-    function togglePlayPause() { isPlaying ? pause() : play(); }
+    function togglePlayPause() {
+        if (isPlaying) {
+            pause();
+        } else {
+            // If stopped (empty audio), start new. If paused, resume.
+            if (isPaused) {
+                play();
+            } else {
+                play();
+            }
+        }
+    }
 
     function play() {
       if (articles.length === 0) return;
@@ -1019,14 +1058,12 @@ function getHTMLContent() {
       if (currentIndex < articles.length - 1) {
         stop(); markPlayed(articles[currentIndex].id);
         currentIndex++; updateDisplay(); renderList();
-        if (isPlaying) play();
       } else showToast('Last article');
     }
 
     function previousArticle() {
       if (currentIndex > 0) {
         stop(); currentIndex--; updateDisplay(); renderList();
-        if (isPlaying) play();
       } else showToast('First article');
     }
 
@@ -1166,7 +1203,7 @@ function getHTMLContent() {
     }
 
     function openReader() {
-      pause();
+      stop();
       // Try deep link first, then fallback to HTTPS which is a Universal Link
       // wiseread://open/private://read/{id}
       const deepLink = 'wiseread://open/private://read/' + articles[currentIndex].id;
@@ -1183,7 +1220,7 @@ function getHTMLContent() {
     }
 
     function openOriginal() {
-      pause();
+      stop();
       window.open(articles[currentIndex].original_url || articles[currentIndex].url, '_blank');
     }
 
