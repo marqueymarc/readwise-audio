@@ -606,6 +606,13 @@ function getHTMLContent() {
       <p class="status" id="status">Ready</p>
     </header>
 
+    <!-- Source Toggle - Always Visible -->
+    <div class="source-toggle" id="sourceToggle">
+      <button class="source-btn active" data-source="all" onclick="setSource('all')">📚 All</button>
+      <button class="source-btn" data-source="feed" onclick="setSource('feed')">📥 Feed</button>
+      <button class="source-btn" data-source="library" onclick="setSource('library')">📖 Library</button>
+    </div>
+
     <div id="loading" class="loading hidden">
       <div class="spinner"></div>
       <p id="loadingText">Fetching and summarizing articles...</p>
@@ -618,12 +625,7 @@ function getHTMLContent() {
     </div>
 
     <div id="player" class="hidden">
-      <!-- Source Toggle -->
-      <div class="source-toggle">
-        <button class="source-btn active" data-source="all" onclick="setSource('all')">📚 All</button>
-        <button class="source-btn" data-source="feed" onclick="setSource('feed')">📥 Feed</button>
-        <button class="source-btn" data-source="library" onclick="setSource('library')">📖 Library</button>
-      </div>
+
 
       <!-- Tabs -->
       <div class="tabs">
