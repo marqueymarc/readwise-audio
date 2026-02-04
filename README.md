@@ -33,7 +33,7 @@ wrangler login
 
 ### 3. Create KV Namespace
 ```bash
-wrangler kv:namespace create "KV"
+wrangler kv namespace create "KV"
 ```
 Copy the ID output and paste it into `wrangler.toml` replacing `YOUR_KV_NAMESPACE_ID`.
 

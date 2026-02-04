@@ -13,6 +13,9 @@
 // ============ CONFIGURATION ============
 
 import { CLAUDE_MODEL, SUMMARY_WORD_TARGET, MAX_ARTICLES, SUMMARY_CACHE_TTL, SYSTEM_PROMPT } from './config.js';
+import { mockReadwiseList, mockReadwiseUpdate, mockReadwiseDelete } from './mocks/readwise-api.js';
+import { mockTTSResponse } from './mocks/tts-api.js';
+import { mockClaudeResponse } from './mocks/claude-api.js';
 
 
 
@@ -55,6 +58,10 @@ export default {
       if (path === '/manifest.json') {
         return serveManifest();
       }
+      if (path === '/favicon.ico') {
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23e94560" width="100" height="100" rx="20"/><text x="50" y="65" text-anchor="middle" font-size="50" fill="white">🎧</text></svg>';
+        return new Response(svg, { headers: { 'Content-Type': 'image/svg+xml' } });
+      }
 
       return new Response('Not Found', { status: 404 });
     } catch (error) {
@@ -72,9 +79,10 @@ export default {
 async function handleFeed(request, env, corsHeaders) {
   const url = new URL(request.url);
   const location = url.searchParams.get('location') || 'all'; // 'feed', 'library', 'all'
+  const useMock = url.searchParams.get('mock') === 'true';
 
   // 1. Fetch articles from Readwise Reader
-  const articles = await fetchAllReadwiseArticles(env, location);
+  const articles = await fetchAllReadwiseArticles(env, location, useMock);
 
   // 2. Get heard/later articles from KV
   const heardIds = await getHeardIds(env);
@@ -92,10 +100,9 @@ async function handleFeed(request, env, corsHeaders) {
   for (const article of newArticles.slice(0, MAX_ARTICLES)) {
     try {
       const generatedUrl = `https://read.readwise.io/read/${article.id}`;
-      console.log(`[DEBUG] Processing Article: "${article.title}" (ID: ${article.id}) Location: ${article.location}`);
-      console.log(`[DEBUG] URLs -> Source: ${article.source_url}, Generated Reader: ${generatedUrl}`);
+      // console.log(`[DEBUG] Processing Article: "${article.title}" (ID: ${article.id}) Location: ${article.location}`);
 
-      const summary = await getCachedOrSummarize(article, env);
+      const summary = await getCachedOrSummarize(article, env, useMock);
       summaries.push({
         id: article.id,
         title: article.title || 'Untitled',
@@ -107,6 +114,9 @@ async function handleFeed(request, env, corsHeaders) {
         original_url: article.source_url || article.url,
         word_count: (article.content || '').split(/\s+/).length,
         location: article.location,
+        image_url: article.image_url || article.cover_image_url || article.cover_image,
+        published_date: article.published_date,
+        saved_at: article.saved_at,
       });
 
       if (laterIds.has(article.id)) {
@@ -127,7 +137,19 @@ async function handleFeed(request, env, corsHeaders) {
 }
 
 async function handleTTS(request, env, corsHeaders) {
-  const { text, voice = 'alloy' } = await request.json();
+  const url = new URL(request.url);
+  const useMock = url.searchParams.get('mock') === 'true';
+
+  if (request.method !== 'POST') {
+    return new Response('Method Not Allowed', { status: 405, headers: corsHeaders });
+  }
+
+  if (useMock) {
+    console.log('[Mock] Handling TTS request');
+    return mockTTSResponse(request);
+  }
+
+  const { text, voice = 'alloy', speed = 1.0 } = await request.json();
 
   // Sanity check for API key
   console.log('API Key starts with sk-:', env.OPENAI_API_KEY?.startsWith('sk-'));
@@ -169,6 +191,10 @@ async function handleTTS(request, env, corsHeaders) {
 }
 
 async function handleArchive(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('mock') === 'true') {
+    return new Response(JSON.stringify({ success: true, mock: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   const { id } = await request.json();
   await env.KV.put(`heard:${id}`, Date.now().toString(), { expirationTtl: 60 * 60 * 24 * 30 });
   await updateReadwiseDocument(id, { location: 'archive' }, env);
@@ -178,6 +204,10 @@ async function handleArchive(request, env, corsHeaders) {
 }
 
 async function handleDelete(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('mock') === 'true') {
+    return new Response(JSON.stringify({ success: true, mock: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   const { id } = await request.json();
   await env.KV.put(`heard:${id}`, Date.now().toString(), { expirationTtl: 60 * 60 * 24 * 30 });
   await deleteReadwiseDocument(id, env);
@@ -187,6 +217,10 @@ async function handleDelete(request, env, corsHeaders) {
 }
 
 async function handleLater(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('mock') === 'true') {
+    return new Response(JSON.stringify({ success: true, mock: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   const { id } = await request.json();
   await env.KV.put(`later:${id}`, Date.now().toString(), { expirationTtl: 60 * 60 * 24 * 7 });
   await env.KV.delete(`heard:${id}`);
@@ -265,6 +299,8 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
 
         // Use ID as key for deduplication
         if (!articlesMap.has(doc.id)) {
+          // Debug keys to find image_url (Investigation complete)
+          // if (articlesMap.size === 0) console.log('[DEBUG] Article Keys:', Object.keys(doc));
           articlesMap.set(doc.id, doc);
         }
       });
@@ -314,7 +350,7 @@ async function deleteReadwiseDocument(id, env) {
 
 // ============ SUMMARY CACHING ============
 
-async function getCachedOrSummarize(article, env) {
+async function getCachedOrSummarize(article, env, useMock = false) {
   const cacheKey = `summary:${article.id}`;
 
   // Check cache first
@@ -326,7 +362,7 @@ async function getCachedOrSummarize(article, env) {
 
   // Generate new summary
   console.log(`Cache miss for article ${article.id}, generating...`);
-  const summary = await summarizeArticle(article, env);
+  const summary = await summarizeArticle(article, env, useMock);
 
   // Cache the summary
   await env.KV.put(cacheKey, summary, { expirationTtl: SUMMARY_CACHE_TTL });
@@ -334,7 +370,18 @@ async function getCachedOrSummarize(article, env) {
   return summary;
 }
 
-async function summarizeArticle(article, env) {
+async function summarizeArticle(article, env, useMock = false) {
+  if (useMock) {
+    console.log('[Mock] Generating summary for', article.title);
+    const mockReq = new Request('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: JSON.stringify({ messages: [{ content: "mock prompt" }] })
+    });
+    const mockRes = await mockClaudeResponse(mockReq);
+    const data = await mockRes.json();
+    return data.content[0].text;
+  }
+
   const content = article.content || article.summary || article.notes || '';
   const title = article.title || 'Untitled';
   const source = extractSource(article);
@@ -426,8 +473,8 @@ function getHTMLContent() {
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#f8f9fa">
   <title>Readwise Audio</title>
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="icon" type="image/png" sizes="180x180" href="data:image/png;base64,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">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAAZklEQVRYhe3WMQqAMBBE0fF4Rj2jZ9UzFhYiIgiyW9h8s7AIP0sTTERE50kFlbquUqB2wQOM+NuDWM4LQEltQhOa0IQmNKEJTWhCE5rQhCY04X+C63qB3sFj7sA+wVnC3oQm3D3hA/x0s/W728LIAAAAAElFTkSuQmCC">
   <link rel="manifest" href="/manifest.json">
 
   <style>
@@ -482,9 +529,42 @@ function getHTMLContent() {
     .article-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
     .article-item.active { border-color: #e94560; }
     .article-item.played { opacity: 0.5; }
-    .article-item .source { font-size: 12px; color: #e94560; font-weight: 500; margin-bottom: 4px; }
-    .article-item .title { font-size: 14px; font-weight: 500; line-height: 1.4; color: #1a1a2e; }
-    .article-item .meta { font-size: 11px; color: #888; margin-top: 6px; }
+    .thumb { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; margin-right: 12px; background: #eee; flex-shrink: 0; }
+    .thumb-large { width: 100%; height: 200px; border-radius: 12px; object-fit: cover; margin-bottom: 16px; background: #eee; }
+    .source { font-size: 12px; color: #e94560; font-weight: 500; margin-bottom: 4px; }
+    .title { font-size: 14px; font-weight: 500; line-height: 1.4; color: #1a1a2e; }
+    .meta { font-size: 11px; color: #888; margin-top: 6px; }
+
+    /* Filter Toggle (Sliding Switch) */
+    .filter-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 16px; background: #fff; border-bottom: 1px solid #eee;
+        font-size: 14px; color: #333; font-weight: 500;
+    }
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+    .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+    input:checked + .slider { background-color: #e94560; }
+    input:checked + .slider:before { transform: translateX(20px); }
+
+    /* Floating Help Button */
+    .help-float {
+        position: fixed; bottom: 20px; right: 20px;
+        width: 44px; height: 44px; border-radius: 50%;
+        background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 20px; cursor: pointer; z-index: 900; color: #666;
+        transition: transform 0.2s; border: none;
+    }
+    .help-float:active { transform: scale(0.95); }
+    
+    /* Loading Spinner for Play Button */
+    .spinner {
+        width: 24px; height: 24px; border: 3px solid #fff; border-top-color: transparent;
+        border-radius: 50%; animation: spin 1s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Now Playing */
     .now-playing {
@@ -646,16 +726,23 @@ function getHTMLContent() {
       <!-- Tabs -->
       <div class="tabs">
         <button class="tab active" onclick="showTab('player-view')">▶️ Player</button>
-        <button class="tab" onclick="showTab('list-view')">📋 List (<span id="listCount">0</span>)</button>
-        <button class="tab" onclick="showTab('help-view')">❓ Help</button>
-      </div>
+        <button class="tab" onclick="showAndScrollToList()">📋 List (<span id="listCount">0</span>)</button>
+    </div>
+    
+    <div id="filterBar" class="filter-bar hidden">
+        <span>Show Seen Articles</span>
+        <label class="switch">
+            <input type="checkbox" id="seenToggleCheckbox" onchange="toggleSeenFilter()">
+            <span class="slider"></span>
+        </label>
+    </div>
 
       <!-- Player View -->
       <div id="player-view">
-        <div class="now-playing">
-          <div class="article-counter" id="counter">Article 1 of 20</div>
-          <div class="article-source" id="source">The Atlantic</div>
-          <div class="article-title" id="title">Loading...</div>
+        <div class="now-playing" id="player-info">
+          <div class="article-counter" id="counter">Initializing...</div>
+          <div class="article-source" id="source">...</div>
+          <div class="article-title" id="title">Select an article</div>
           <div class="progress-bar">
             <div class="progress-fill" id="progress"></div>
           </div>
@@ -753,10 +840,12 @@ function getHTMLContent() {
     <div id="full-reader" class="hidden">
       <div id="full-reader-header">
         <h2 style="font-size: 18px; font-weight: 600;">Reading Article</h2>
-        <button class="close-btn" onclick="closeFullReader()">Close</button>
+      <button class="close-btn" onclick="closeFullReader()">Close</button>
       </div>
       <div id="full-reader-content"></div>
     </div>
+    
+    <button class="help-float" onclick="showTab('help-view')">❓</button>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -764,24 +853,39 @@ function getHTMLContent() {
   <script>
     // ============ STATE ============
     let articles = [];
-    let currentIndex = 0;
+    let currentAudio = null;
     let isPlaying = false;
     let isPaused = false;
-    let currentAudio = null;
+    let isLoading = false;
+    let currentIndex = 0;
+    
+    // Debug exposure
+    window.articles = articles;
+    window.currentIndex = currentIndex;
+    let playedIds = new Set(JSON.parse(localStorage.getItem('played') || '[]'));
+    let showSeen = false; // Default: Hide seen items
     let speechSynth = window.speechSynthesis;
     let recognition = null;
     let selectedVoice = localStorage.getItem('voice') || 'alloy';
     let selectedSource = localStorage.getItem('source') || 'all';
-    let playedIds = new Set(JSON.parse(localStorage.getItem('played') || '[]'));
+    let useMock = localStorage.getItem('useMock') === 'true';
 
     // ============ INIT ============
     document.addEventListener('DOMContentLoaded', () => {
+      // Check for mock param in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('mock')) {
+        useMock = urlParams.get('mock') === 'true';
+        localStorage.setItem('useMock', useMock);
+        if (useMock) showToast('Mock Mode Enabled');
+      }
+
       const cached = localStorage.getItem('articles');
       if (cached) {
         try { articles = JSON.parse(cached); } catch (e) { console.error(e); }
       }
 
-      if (articles.length > 0) {
+      if (articles.length>0) {
         showPlayer();
         updateDisplay();
         renderList();
@@ -805,7 +909,7 @@ function getHTMLContent() {
         recognition.interimResults = false;
         recognition.lang = 'en-US';
         recognition.onresult = (e) => handleVoiceCommand(e.results[0][0].transcript.toLowerCase().trim());
-        recognition.onerror = () => document.getElementById('voiceBtn').classList.remove('listening');
+        recognition.onerror=() => document.getElementById('voiceBtn').classList.remove('listening');
         recognition.onend = () => document.getElementById('voiceBtn').classList.remove('listening');
       }
     });
@@ -828,6 +932,7 @@ function getHTMLContent() {
       ['player-view', 'list-view', 'help-view'].forEach(id => {
         document.getElementById(id).classList.toggle('hidden', id !== tabId);
       });
+      document.getElementById('filterBar').classList.toggle('hidden', tabId !== 'list-view');
     }
 
     // ============ SYNC ============
@@ -836,7 +941,8 @@ function getHTMLContent() {
       updateStatus('Syncing...');
 
       try {
-        const response = await fetch('/api/feed?location=' + selectedSource);
+        const mockParam = useMock ? '&mock=true' : '';
+        const response = await fetch('/api/feed?location=' + selectedSource + mockParam);
         const data = await response.json();
         if (data.error) throw new Error(data.error);
 
@@ -877,6 +983,7 @@ function getHTMLContent() {
           updateDisplay();
           renderList();
           updateStatus(articles.length + ' articles ready');
+          window.articles = articles;
           showToast(articles.length + ' articles loaded');
         }
       } catch (error) {
@@ -888,16 +995,54 @@ function getHTMLContent() {
     }
 
     // ============ LIST ============
+    function toggleSeenFilter() {
+        showSeen = document.getElementById('seenToggleCheckbox').checked;
+        renderList();
+    }
+
     function renderList() {
       const list = document.getElementById('articleList');
-      document.getElementById('listCount').textContent = articles.length;
-      list.innerHTML = articles.map((article, i) =>
-        '<div class="article-item ' + (i === currentIndex ? 'active' : '') + ' ' + (playedIds.has(article.id) ? 'played' : '') + '" onclick="selectArticle(' + i + ')">' +
-        '<div class="source">' + article.source + '</div>' +
-        '<div class="title">' + article.title + '</div>' +
-        '<div class="meta">' + (article.word_count || '?') + ' words</div>' +
-        '</div>'
-      ).join('');
+      
+      // Filter logic
+      const visibleArticles = articles.map((a, i) => ({...a, originalIndex: i}))
+          .filter(a => showSeen || !playedIds.has(a.id));
+
+      document.getElementById('listCount').textContent = visibleArticles.length;
+      document.getElementById('filterBar').classList.remove('hidden');
+
+      // Log removed
+      if (visibleArticles.length === 0) {
+          list.innerHTML = '<div style="padding:40px; text-align:center; color:#999;">No articles found.<br><small>Try enabling "Show Seen" or sync again.</small></div>';
+          return;
+      }
+
+      list.innerHTML = visibleArticles.map((article) => {
+        const isActive = article.originalIndex === currentIndex;
+        const isPlayed = playedIds.has(article.id);
+        
+        let thumbHtml = '';
+        if (article.image_url) {
+            thumbHtml = '<img src="' + article.image_url + '" class="thumb" onerror="this.style.display=&quot;none&quot;">';
+        }
+
+        // Safe Date Formatting
+        let dateStr = '';
+        try {
+            const d = new Date(article.published_date || article.saved_at);
+            if (!isNaN(d.getTime())) {
+                dateStr = d.toLocaleDateString();
+            }
+        } catch (e) {}
+
+        let html = '<div class="article-item ' + (isActive ? 'active' : '') + ' ' + (isPlayed ? 'played' : '') + '" onclick="selectArticle(' + article.originalIndex + ')">';
+        html += thumbHtml;
+        html += '<div style="flex:1; min-width:0;">';
+        html += '<div class="source">' + (article.source || article.site_name || 'Unknown') + '</div>';
+        html += '<div class="title">' + article.title + '</div>';
+        html += '<div class="meta">' + (article.word_count || '?') + ' words • ' + dateStr + '</div>';
+        html += '</div></div>';
+        return html;
+      }).join('');
     }
 
     function selectArticle(index) {
@@ -908,7 +1053,8 @@ function getHTMLContent() {
       document.querySelector('[onclick="showTab(\\'player-view\\')"]').classList.add('active');
       document.querySelector('[onclick="showTab(\\'list-view\\')"]').classList.remove('active');
       document.querySelector('[onclick="showTab(\\'help-view\\')"]').classList.remove('active');
-      play();
+      document.querySelector('[onclick="showTab(\\'help-view\\')"]').classList.remove('active');
+      play(index);
     }
 
     // ============ VOICE ============
@@ -925,19 +1071,23 @@ function getHTMLContent() {
 
       if (selectedVoice === 'browser') {
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.0;
+        utterance.rate = 1.15; // Browser fallback speed
         utterance.onend = onEnd;
-        utterance.onerror = () => { isPlaying = false; updatePlayButton(); };
+        utterance.onerror=() => { isPlaying = false; updatePlayButton(); };
         speechSynth.speak(utterance);
         return;
       }
 
+      isLoading = true;
+      updatePlayButton();
       showToast('Generating audio...');
+      
       try {
-        const response = await fetch('/api/tts', {
+        const mockParam = useMock ? '?mock=true' : '';
+        const response = await fetch('/api/tts' + mockParam, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, voice: selectedVoice }),
+          body: JSON.stringify({ text, voice: selectedVoice, speed: 1.15 }),
         });
 
         // Check for JSON error response (e.g. invalid API key)
@@ -954,14 +1104,18 @@ function getHTMLContent() {
 
         currentAudio = new Audio(audioUrl);
         currentAudio.onended = () => { URL.revokeObjectURL(audioUrl); if (onEnd) onEnd(); };
-        currentAudio.onerror = () => { isPlaying = false; updatePlayButton(); };
+        currentAudio.onerror=() => { isPlaying = false; updatePlayButton(); };
         currentAudio.play();
       } catch (error) {
         console.error('TTS error:', error);
         showToast('Audio failed, using browser');
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.onend = onEnd;
+        utterance.rate = 1.15;
         speechSynth.speak(utterance);
+      } finally {
+        isLoading = false;
+        updatePlayButton();
       }
     }
 
@@ -979,11 +1133,15 @@ function getHTMLContent() {
         }
     }
 
-    function play() {
+    function play(index = null) {
+      if (typeof index === 'number') {
+        currentIndex = index;
+      }
+
       if (articles.length === 0) return;
 
       // Resume if paused
-      if (isPaused) {
+      if (isPaused && index === null) {
         if (currentAudio) currentAudio.play();
         else speechSynth.resume();
         
@@ -994,7 +1152,7 @@ function getHTMLContent() {
       }
 
       const article = articles[currentIndex];
-      const text = 'Next, from ' + article.source + '. ' + article.summary;
+      const text = 'Next, from ' + (article.site_name || article.source) + '. ' + article.summary;
 
       isPlaying = true;
       updatePlayButton();
@@ -1018,7 +1176,7 @@ function getHTMLContent() {
             updateDisplay();
             renderList();
             play();
-          } else if (currentIndex >= articles.length - 1) {
+          } else if (currentIndex>= articles.length - 1) {
             isPlaying = false;
             updatePlayButton();
             showToast('Finished all articles');
@@ -1049,6 +1207,7 @@ function getHTMLContent() {
       }
       isPaused = false;
       isPlaying = false;
+      isLoading = false;
       updatePlayButton();
     }
 
@@ -1056,14 +1215,24 @@ function getHTMLContent() {
 
     function skipArticle() {
       if (currentIndex < articles.length - 1) {
-        stop(); markPlayed(articles[currentIndex].id);
-        currentIndex++; updateDisplay(); renderList();
+        const wasPlaying = isPlaying && !isPaused;
+        stop(); 
+        markPlayed(articles[currentIndex].id);
+        currentIndex++; 
+        updateDisplay(); 
+        renderList();
+        if (wasPlaying) play(); // Auto-play next if we were playing
       } else showToast('Last article');
     }
 
     function previousArticle() {
       if (currentIndex > 0) {
-        stop(); currentIndex--; updateDisplay(); renderList();
+        const wasPlaying = isPlaying && !isPaused;
+        stop(); 
+        currentIndex--; 
+        updateDisplay(); 
+        renderList();
+        if (wasPlaying) play(); // Auto-play prev if we were playing
       } else showToast('First article');
     }
 
@@ -1073,7 +1242,6 @@ function getHTMLContent() {
       renderList();
     }
 
-    // ============ READ FULL ============
     // ============ READ FULL ============
     let readQueue = [];
     let readIndex = 0;
@@ -1096,24 +1264,24 @@ function getHTMLContent() {
       div.querySelectorAll('script, style, iframe, nav, header, footer').forEach(e => e.remove());
       
       // Get chunks (paragraphs)
-      // Strategy: Iterate over <p>, <li>, <blockquote>, <h1>-<h6>
+      // Strategy: Iterate over <p>, <li>, blockquote, <h1>-<h6>
       const blocks = div.querySelectorAll('p, li, blockquote, h1, h2, h3, h4, h5, h6');
       readQueue = [];
       
-      if (blocks.length > 0) {
+      if (blocks.length>0) {
         blocks.forEach(block => {
           const text = block.innerText.trim();
-          if (text.length > 5) readQueue.push(text); // Filter tiny garbage
+          if (text.length>5) readQueue.push(text); // Filter tiny garbage
         });
       } else {
         // Fallback for plain text or weird formatting
-        readQueue = div.innerText.split(/\\n\\s*\\n/).map(t => t.trim()).filter(t => t.length > 5);
+        readQueue = div.innerText.split(/\\n\\s*\\n/).map(t => t.trim()).filter(t => t.length>5);
       }
 
       // 1. Show UI
       const contentDiv = document.getElementById('full-reader-content');
       contentDiv.innerHTML = readQueue.map((text, i) => 
-        \`<div class="reader-p" id="p-\${i}" onclick="playParagraph(\${i})">\${text}</div>\`
+        '<div class="reader-p" id="p-' + i + '" onclick="playParagraph(' + i + ')">' + text + '</div>'
       ).join('');
       
       document.getElementById('full-reader').classList.remove('hidden');
@@ -1125,7 +1293,7 @@ function getHTMLContent() {
     }
 
     function playParagraph(index) {
-      if (index >= readQueue.length) {
+      if (index>= readQueue.length) {
         showToast('Finished reading');
         return;
       }
@@ -1134,7 +1302,7 @@ function getHTMLContent() {
       
       // Update UI highlights
       document.querySelectorAll('.reader-p').forEach(p => p.classList.remove('active'));
-      const activeP = document.getElementById(\`p-\${index}\`);
+      const activeP = document.getElementById('p-' + index);
       if (activeP) {
         activeP.classList.add('active');
         activeP.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1164,7 +1332,8 @@ function getHTMLContent() {
       const article = articles[currentIndex];
       showToast('Archiving...');
       try {
-        await fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: article.id }) });
+        const mockParam = useMock ? '?mock=true' : '';
+        await fetch('/api/archive' + mockParam, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: article.id }) });
         showToast('Archived');
         removeCurrentArticle();
       } catch (e) { showToast('Failed'); }
@@ -1175,7 +1344,8 @@ function getHTMLContent() {
       const article = articles[currentIndex];
       showToast('Deleting...');
       try {
-        await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: article.id }) });
+        const mockParam = useMock ? '?mock=true' : '';
+        await fetch('/api/delete' + mockParam, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: article.id }) });
         showToast('Deleted');
         removeCurrentArticle();
       } catch (e) { showToast('Failed'); }
@@ -1186,8 +1356,13 @@ function getHTMLContent() {
       const article = articles[currentIndex];
       showToast('Saved for later');
       try {
-        await fetch('/api/later', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: article.id }) });
-        removeCurrentArticle();
+        const mockParam = useMock ? '?mock=true' : '';
+        await fetch('/api/later' + mockParam, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: article.id }) });
+        markPlayed(article.id); // Mark as seen locally immediately
+        updateDisplay();
+        renderList(); 
+        // If "Show Seen" is OFF, it will naturally disappear from list in renderList() filtering
+        // If ON, it stays but fades.
       } catch (e) { showToast('Failed'); }
     }
 
@@ -1197,7 +1372,7 @@ function getHTMLContent() {
       localStorage.setItem('articles', JSON.stringify(articles));
       if (articles.length === 0) showEmpty();
       else {
-        if (currentIndex >= articles.length) currentIndex = articles.length - 1;
+        if (currentIndex>= articles.length) currentIndex = articles.length - 1;
         updateDisplay(); renderList(); play();
       }
     }
@@ -1247,7 +1422,7 @@ function getHTMLContent() {
       else if (cmd.includes('pause') || cmd.includes('stop')) pause();
       else if (cmd.includes('play') || cmd.includes('resume')) play();
       else if (cmd.includes('read full') || cmd.includes('full article') || cmd === 'read') readFullArticle();
-      else if (cmd.includes('list')) { showTab('list-view'); document.querySelector('[onclick="showTab(\\'list-view\\')"]').click(); }
+      else if (cmd.includes('list')) { showAndScrollToList(); }
       else { showToast('Unknown command'); setTimeout(() => play(), 1000); }
     }
 
@@ -1255,13 +1430,53 @@ function getHTMLContent() {
     function updateDisplay() {
       if (articles.length === 0) return;
       const article = articles[currentIndex];
-      document.getElementById('counter').textContent = 'Article ' + (currentIndex + 1) + ' of ' + articles.length;
-      document.getElementById('source').textContent = article.source;
-      document.getElementById('title').textContent = article.title;
-      document.getElementById('progress').style.width = '0%';
+      // updatePlayButton call is handled by state changes now
     }
 
-    function updatePlayButton() { document.getElementById('playPauseBtn').textContent = isPlaying ? '⏸️' : '▶️'; }
+    function updatePlayButton() {
+      const button = document.getElementById('playPauseBtn');
+      const container = document.getElementById('player-info');
+      const article = articles[currentIndex];
+      
+      // Update Player Info (Title/Image)
+      if (article) {
+         let thumbHtml = '';
+         if (article.image_url) {
+            thumbHtml = '<img src="' + article.image_url + '" class="thumb-large" onerror="this.style.display=&quot;none&quot;">';
+         }
+            
+        container.innerHTML = thumbHtml + 
+           '<div class="article-counter">Article ' + (currentIndex + 1) + ' of ' + articles.length + '</div>' +
+           '<div class="article-source">' + (article.source || article.site_name) + '</div>' + 
+           '<div class="article-title">' + article.title + '</div>';
+       } // This brace was missing
+       if (isLoading) {
+         button.innerHTML = '<div class="spinner"></div>';
+         button.title = "Loading...";
+         button.onclick = null; // Disable click while loading
+       } else {
+         button.onclick = togglePlayPause; // Re-enable click
+         if (isPlaying && !isPaused) {
+           button.textContent = '⏸️'; // Pause icon
+           button.title = "Pause";
+         } else {
+           button.textContent = '▶️'; // Play icon
+           button.title = "Play";
+         }
+       }
+    }
+
+    function showAndScrollToList() {
+      showTab('list-view');
+      // Scroll to active article
+      setTimeout(() => {
+          const activeItem = document.querySelector('.article-item.active');
+          if (activeItem) {
+              activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+      }, 100);
+    }
+
     function updateStatus(text) { document.getElementById('status').textContent = text; }
 
     function showLoading() {
