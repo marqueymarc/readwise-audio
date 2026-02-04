@@ -101,6 +101,10 @@ async function handleFeed(request, env, corsHeaders) {
   const summaries = [];
   for (const article of newArticles.slice(0, MAX_ARTICLES)) {
     try {
+      const generatedUrl = `https://readwise.io/reader/document/${article.id}`;
+      console.log(`[DEBUG] Processing Article: "${article.title}" (ID: ${article.id}) Location: ${article.location}`);
+      console.log(`[DEBUG] URLs -> Source: ${article.source_url}, Generated Reader: ${generatedUrl}`);
+
       const summary = await getCachedOrSummarize(article, env);
       summaries.push({
         id: article.id,
@@ -109,7 +113,7 @@ async function handleFeed(request, env, corsHeaders) {
         summary: summary,
         content: article.content || article.html || article.text || '',
         url: article.url,
-        readwise_url: `https://readwise.io/reader/document/${article.id}`,
+        readwise_url: generatedUrl,
         original_url: article.source_url || article.url,
         word_count: (article.content || '').split(/\s+/).length,
         location: article.location,
@@ -249,10 +253,12 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
       if (doc.category !== 'article') return false;
       if (doc.location === 'archive') return false;
 
+      const loc = (doc.location || '').toLowerCase();
+
       if (locationFilter === 'feed') {
-        return doc.location === 'new' || doc.location === 'feed';
+        return loc === 'new' || loc === 'feed';
       } else if (locationFilter === 'library') {
-        return doc.location === 'later' || doc.location === 'shortlist';
+        return loc === 'later' || loc === 'shortlist';
       }
       return true;
     });
