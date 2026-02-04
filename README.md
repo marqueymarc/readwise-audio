@@ -1,212 +1,149 @@
 # Readwise Audio Summary Player
 
-A PWA that plays AI-generated audio summaries of your Readwise Reader articles with voice commands.
+A PWA that plays AI-generated audio summaries of your Readwise Reader articles with voice commands. It intelligently syncs your Feed (RSS/Newsletters) and Library (Inbox/Later/Shortlist), generates succinct summaries using Claude, and reads them aloud using high-quality OpenAI streaming TTS.
 
 ## Features
 
-- Fetches articles from Readwise Reader
-- Generates 30-second summaries using Claude
-- Plays summaries using browser text-to-speech
-- Voice commands: "archive", "delete", "later", "open", "skip", "pause"
-- Button controls as fallback
-- Installable as PWA on iPhone
+- **Smart Sync:**
+  - **Feed Tab:** Shows RSS and Newsletter items (`location: feed`).
+  - **Library Tab:** Shows Inbox (`new`), Later (`later`), and Shortlist (`shortlist`) items.
+  - **Recent First:** Articles are strictly ordered by date.
+- **AI Summaries:** Generates ~30-second summaries using Claude 3 Haiku.
+- **High-Quality Audio:** Streaming Text-to-Speech using OpenAI's `gpt-4o-mini-tts` (low latency).
+- **Mobile Optimized:**
+  - **Deep Linking:** "Reader" button launches the native **Readwise Reader** iOS app (`wiseread://`).
+  - **Web Fallback:** Falls back to `read.readwise.io` for reliable web access.
+  - **PWA:** Installable as a full-screen app on iOS/Android.
+- **Voice Commands:** "archive", "delete", "later", "open", "skip", "pause", "read full".
+- **Robust:** Handles API rate limits (429 errors) with smart retries.
 
 ---
 
 ## Deployment Steps
 
 ### 1. Install Wrangler CLI
-
 ```bash
 npm install -g wrangler
 ```
 
 ### 2. Login to Cloudflare
-
 ```bash
 wrangler login
 ```
 
-This opens a browser to authenticate.
-
 ### 3. Create KV Namespace
-
 ```bash
 wrangler kv:namespace create "KV"
 ```
+Copy the ID output and paste it into `wrangler.toml` replacing `YOUR_KV_NAMESPACE_ID`.
 
-This outputs something like:
-```
-{ binding = "KV", id = "abc123..." }
-```
+### 4. Set Up API Keys
 
-**Copy that ID** and paste it into `wrangler.toml` replacing `YOUR_KV_NAMESPACE_ID`.
-
-### 4. Set Up Claude API Access
-
+#### Anthropic (Summaries)
 1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Sign up or log in
-3. Go to **Settings** → **API Keys**
-4. Click **Create Key**, copy it
-5. Go to **Settings** → **Billing** → Add $5 credit (your usage will be ~$0.50/month)
+2. Create an API Key.
+3. Ensure you have credits loaded.
+
+#### OpenAI (TTS)
+1. Go to [platform.openai.com](https://platform.openai.com)
+2. Create an API Key.
+
+#### Readwise (Content)
+1. Go to Reader → Preferences → Access tokens.
+2. Copy your **Reader** token.
 
 ### 5. Add Secrets
-
-Run these commands (you'll be prompted to paste each value):
+Run these commands:
 
 ```bash
 wrangler secret put READWISE_TOKEN
+# Paste Readwise token
 ```
-Paste your Readwise Reader token (from Reader → Preferences → Access tokens)
 
 ```bash
 wrangler secret put CLAUDE_API_KEY
+# Paste Anthropic key
 ```
-Paste your Anthropic API key from step 4.
+
+```bash
+wrangler secret put OPENAI_API_KEY
+# Paste OpenAI key
+```
 
 ### 6. Deploy
-
 ```bash
 wrangler deploy
 ```
-
-This outputs your URL:
-```
-Published readwise-audio to https://readwise-audio.YOUR-SUBDOMAIN.workers.dev
-```
+This outputs your worker URL.
 
 ---
 
-## Using the App
+## Usage
 
-### On iPhone:
+### On iPhone (PWA)
+1. Open the URL in Safari.
+2. Tap Share → **"Add to Home Screen"**.
+3. Open the app from your home screen.
 
-1. Open the URL in Safari
-2. Tap the Share button (box with arrow)
-3. Scroll down, tap **"Add to Home Screen"**
-4. Tap **Add**
+### Controls
+- **Tabs:** Switch between **Feed** (RSS) and **Library** (Inbox/Later).
+- **Voice Dropdown:** Select from OpenAI voices (Alloy, Echo, Shimmer, etc.) or free Browser TTS.
+- **Actions:**
+  - **Reader:** Opens the article in the native Readwise Reader app.
+  - **Original:** Opens the source URL.
+  - **Read Full:** Reads the full article content aloud.
+  - **Archive/Delete/Later:** Managing article state in Readwise.
 
-Now you have an app icon that opens full-screen!
-
-### Daily Use:
-
-1. Open the app
-2. Tap **Sync Feed** to fetch new articles
-3. Tap **▶️** to start listening
-4. Between articles, use buttons OR hold the mic button and say:
-   - "archive" - saves and moves to next
-   - "delete" - removes from Readwise
-   - "later" - will appear again tomorrow
-   - "open" - opens in browser/Reader
-   - "skip" / "next" - move to next article
-   - "pause" - stops playback
+### Voice Commands
+Hold the mic button and say:
+- "archive" / "delete" / "later"
+- "open" (original) / "reader" (app)
+- "skip" / "next" / "previous"
+- "pause" / "resume" / "stop"
+- "read full"
 
 ---
 
-## Customization
+## Configuration
 
-### Change summary length
+### Customization
+Edit `worker.js` constants:
+- `SUMMARY_WORD_TARGET`: Target length of summaries (default: 120 words).
+- `CLAUDE_MODEL`: AI model for summarization (default: `claude-3-haiku-20240307`).
 
-Edit `SUMMARY_WORD_TARGET` in `worker.js` (line 12).
-
-### Change Claude model
-
-Edit `CLAUDE_MODEL` in `worker.js`. Options:
-- `claude-3-haiku-20240307` (fastest, cheapest - recommended)
-- `claude-3-5-sonnet-20241022` (better quality, higher cost)
-
-### Change TTS voice/speed
-
-In the HTML section, find `currentUtterance.rate = 1.0` and adjust:
-- `rate`: 0.5 (slow) to 2.0 (fast)
-- `pitch`: 0.5 (low) to 2.0 (high)
+### TTS Voices
+The app supports:
+- **OpenAI:** `alloy`, `echo`, `shimmer`, `ash`, `ballad`, `coral`, `sage`, `verse`.
+- **Browser:** Local device voice (free, offline).
 
 ---
 
 ## Troubleshooting
 
-### "Sync failed"
-- Check your READWISE_TOKEN is correct (Reader → Preferences → Access tokens)
-- Make sure it's a Reader token, not classic Readwise
+### "Sync failed" / "Empty Feed"
+- Check that your `READWISE_TOKEN` is valid.
+- Ensure you have unarchived items in your Feed/Inbox.
+- Verify `wrangler tail` logs for 429 errors (the app automatically retries, but heavy rate limits might persist).
 
-### No audio playing
-- iOS Safari requires a user tap to enable audio - tap play button first
-- Check your phone isn't on silent mode
-
-### Voice commands not working
-- Must hold the mic button while speaking
-- Speak clearly after the button shows "listening" state
-- Some browsers require HTTPS (Cloudflare Workers provides this)
-
-### Articles not showing
-- Check you have articles in Readwise Reader (not archived)
-- The app only shows articles with `category: "article"`
+### Deep Link doesn't open App
+- Ensure you have **Readwise Reader** (yellow icon) installed.
+- The app uses `wiseread://`. If that fails, it falls back to the web reader.
 
 ---
 
-## Costs
-
-| Service | Monthly Cost |
-|---------|--------------|
-| Cloudflare Workers | Free (100k requests/day) |
-| Cloudflare KV | Free (100k reads/day) |
-| Claude Haiku | ~$0.50 for 600 articles |
-| Browser TTS | Free |
-| **Total** | **~$0.50/month** |
+## Costs (Estimated)
+| Service | Cost |
+|---------|------|
+| **Cloudflare** | Free (100k requests/day) |
+| **Claude** | ~$0.50 for 600 summaries |
+| **OpenAI TTS** | ~$9.00 per 1M characters (very cheap for summaries) |
+| **Total** | **<$2.00/month** for heavy daily use |
 
 ---
 
 ## Testing
-
-The project includes a comprehensive test suite using Vitest with Cloudflare's worker pool.
-
-### Install Dependencies
-
+Run the comprehensive test suite:
 ```bash
 npm install
-```
-
-### Run Tests
-
-```bash
-# Run all tests once
 npm test
-
-# Run tests in watch mode (re-runs on file changes)
-npm run test:watch
-
-# Run tests with coverage report
-npm run test:coverage
 ```
-
-### Test Coverage
-
-The test suite covers:
-
-| Category | Tests |
-|----------|-------|
-| **Unit: extractSource** | 8 tests - source extraction from various article formats |
-| **Unit: getHeardIds/getLaterIds** | 5 tests - KV list parsing |
-| **Unit: Configuration** | 2 tests - config constants |
-| **Integration: API Endpoints** | 10 tests - all 4 endpoints + CORS + 404 |
-| **Error Handling** | 2 tests - Readwise/Claude API failures |
-| **Edge Cases** | 2 tests - empty feeds, missing fields |
-
-### Adding Tests
-
-Tests are in `worker.test.js`. The test file:
-- Mocks KV store with `createMockKV()`
-- Mocks external APIs (Readwise, Claude) by overriding `globalThis.fetch`
-- Uses realistic fixtures matching Readwise API response format
-
----
-
-## Updating
-
-After making changes to `worker.js`:
-
-```bash
-wrangler deploy
-```
-
-Changes are live in seconds.
