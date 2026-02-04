@@ -141,6 +141,28 @@ The app supports:
 
 ---
 
+## Local Development
+
+You can run the full Cloudflare worker locally to debug logic (and see `console.log` output).
+
+1.  **Create a `.dev.vars` file** in the project root:
+    ```ini
+    READWISE_TOKEN=your_token
+    CLAUDE_API_KEY=your_key
+    OPENAI_API_KEY=your_key
+    ```
+2.  **Start the Local Server:**
+    ```bash
+    npx wrangler dev
+    ```
+3.  **Open:** `http://localhost:8787`
+
+**Benefits:**
+-   **Real-time Logs:** See console output in your terminal.
+-   **Safe Testing:** Uses a local KV store by default, preserving your production data.
+
+---
+
 ## Testing
 Run the comprehensive test suite:
 ```bash

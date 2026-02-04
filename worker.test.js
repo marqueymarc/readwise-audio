@@ -9,9 +9,11 @@ import {
   extractSource,
   getHeardIds,
   getLaterIds,
+} from './worker.js';
+import {
   CLAUDE_MODEL,
   SUMMARY_WORD_TARGET,
-} from './worker.js';
+} from './config.js';
 
 // Import the worker's default export for integration tests
 import worker from './worker.js';
@@ -202,11 +204,8 @@ describe('getLaterIds', () => {
 // ============ UNIT TESTS: Configuration ============
 
 describe('Configuration', () => {
-  it('uses Claude Haiku model', () => {
+  it('exports valid settings', () => {
     expect(CLAUDE_MODEL).toBe('claude-3-haiku-20240307');
-  });
-
-  it('targets ~30 second summaries (120 words)', () => {
     expect(SUMMARY_WORD_TARGET).toBe(120);
   });
 });
