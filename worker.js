@@ -101,7 +101,7 @@ async function handleFeed(request, env, corsHeaders) {
   const summaries = [];
   for (const article of newArticles.slice(0, MAX_ARTICLES)) {
     try {
-      const generatedUrl = `https://readwise.io/reader/document/${article.id}`;
+      const generatedUrl = `https://read.readwise.io/read/${article.id}`;
       console.log(`[DEBUG] Processing Article: "${article.title}" (ID: ${article.id}) Location: ${article.location}`);
       console.log(`[DEBUG] URLs -> Source: ${article.source_url}, Generated Reader: ${generatedUrl}`);
 
