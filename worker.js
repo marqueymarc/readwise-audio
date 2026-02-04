@@ -478,8 +478,8 @@ function getHTMLContent() {
     }
     .source-btn.active { background: #e94560; color: #fff; }
 
-    /* Article List */
-    .article-list { max-height: 400px; overflow-y: auto; margin-bottom: 16px; }
+    /* Article List - Allow full page scrolling */
+    .article-list { margin-bottom: 16px; }
     .article-item {
       padding: 16px; background: #fff; border-radius: 12px;
       margin-bottom: 8px; cursor: pointer; transition: all 0.2s;
@@ -508,20 +508,20 @@ function getHTMLContent() {
     .controls { display: flex; justify-content: center; gap: 12px; margin: 20px 0; }
     .control-btn {
       width: 52px; height: 52px; border-radius: 50%; border: none;
-      background: #fff; color: #1a1a2e; font-size: 18px;
+      background: #fff; color: #1a1a2e; font-size: 24px;
       cursor: pointer; transition: all 0.2s;
       display: flex; align-items: center; justify-content: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .control-btn:hover { transform: scale(1.05); }
     .control-btn:active { transform: scale(0.95); }
-    .control-btn.primary { width: 68px; height: 68px; background: #e94560; color: #fff; font-size: 26px; }
+    .control-btn.primary { width: 68px; height: 68px; background: #e94560; color: #fff; font-size: 32px; }
 
     /* Actions */
     .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
     .action-btn {
       padding: 16px 8px; border-radius: 12px; border: none;
-      background: #fff; color: #1a1a2e; font-size: 11px; font-weight: 600;
+      background: #fff; color: #1a1a2e; font-size: 12px; font-weight: 600;
       cursor: pointer; transition: all 0.2s;
       display: flex; flex-direction: column; align-items: center; gap: 6px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -529,7 +529,7 @@ function getHTMLContent() {
       justify-content: center;
     }
     .action-btn:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-    .action-btn .icon { font-size: 20px; }
+    .action-btn .icon { font-size: 28px; }
     .action-btn.delete { color: #dc3545; }
     .action-btn.archive { color: #28a745; }
     .action-btn.later { color: #ffc107; }
@@ -1052,6 +1052,7 @@ function getHTMLContent() {
     let readIndex = 0;
 
     function readFullArticle() {
+      stop(); // Stop summary playback
       const article = articles[currentIndex];
       if (!article.content) { showToast('No content, opening Reader...'); openReader(); return; }
 
@@ -1132,6 +1133,7 @@ function getHTMLContent() {
 
     // ============ ACTIONS ============
     async function archiveArticle() {
+      stop();
       const article = articles[currentIndex];
       showToast('Archiving...');
       try {
@@ -1142,6 +1144,7 @@ function getHTMLContent() {
     }
 
     async function deleteArticle() {
+      stop();
       const article = articles[currentIndex];
       showToast('Deleting...');
       try {
@@ -1152,6 +1155,7 @@ function getHTMLContent() {
     }
 
     async function laterArticle() {
+      stop();
       const article = articles[currentIndex];
       showToast('Saved for later');
       try {
