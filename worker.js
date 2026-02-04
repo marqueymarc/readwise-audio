@@ -280,6 +280,7 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
       });
 
       nextCursor = data.nextPageCursor;
+      if (!nextCursor) break;
       fetchedCount += (data.results || []).length;
 
       // Gentle pacing
@@ -441,15 +442,14 @@ function getHTMLContent() {
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f8f9fa;
+      background: #f8f9fa; margin: 0; padding: 20px;
       color: #1a1a2e;
-      min-height: 100vh;
-      padding: 20px;
+      overflow-x: hidden; /* Fix side-wiggle */
       padding-top: max(20px, env(safe-area-inset-top));
       padding-bottom: max(20px, env(safe-area-inset-bottom));
     }
 
-    .container { max-width: 500px; margin: 0 auto; }
+    .container { max-width: 600px; margin: 0 auto; padding-bottom: 80px; }
 
     header { text-align: center; margin-bottom: 20px; }
     h1 { font-size: 24px; font-weight: 600; margin-bottom: 5px; color: #1a1a2e; }
@@ -518,13 +518,15 @@ function getHTMLContent() {
     .control-btn.primary { width: 68px; height: 68px; background: #e94560; color: #fff; font-size: 26px; }
 
     /* Actions */
-    .actions { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 16px; }
+    .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
     .action-btn {
-      padding: 12px 4px; border-radius: 12px; border: none;
-      background: #fff; color: #1a1a2e; font-size: 10px; font-weight: 500;
+      padding: 16px 8px; border-radius: 12px; border: none;
+      background: #fff; color: #1a1a2e; font-size: 11px; font-weight: 600;
       cursor: pointer; transition: all 0.2s;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      min-height: 60px; /* Larger touch target */
+      justify-content: center;
     }
     .action-btn:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
     .action-btn .icon { font-size: 20px; }
@@ -695,16 +697,19 @@ function getHTMLContent() {
           </button>
         </div>
 
-        <div class="voice-selector">
-          <button class="voice-option" data-voice="browser" onclick="setVoice('browser')">🔊 Browser</button>
-          <button class="voice-option active" data-voice="alloy" onclick="setVoice('alloy')">🎙️ Alloy</button>
-          <button class="voice-option" data-voice="echo" onclick="setVoice('echo')">🎙️ Echo</button>
-          <button class="voice-option" data-voice="shimmer" onclick="setVoice('shimmer')">🎙️ Shimmer</button>
-          <button class="voice-option" data-voice="ash" onclick="setVoice('ash')">🎙️ Ash</button>
-          <button class="voice-option" data-voice="ballad" onclick="setVoice('ballad')">🎙️ Ballad</button>
-          <button class="voice-option" data-voice="coral" onclick="setVoice('coral')">🎙️ Coral</button>
-          <button class="voice-option" data-voice="sage" onclick="setVoice('sage')">🎙️ Sage</button>
-          <button class="voice-option" data-voice="verse" onclick="setVoice('verse')">🎙️ Verse</button>
+        <div class="voice-selector-container" style="margin-bottom: 16px;">
+           <label style="display:block; font-size:12px; color:#666; margin-bottom:4px; text-align:center;">Voice</label>
+           <select id="voiceSelect" onchange="setVoice(this.value)" style="width:100%; padding:12px; border-radius:12px; border:1px solid #dee2e6; background:#fff; font-size:16px;">
+             <option value="alloy">Alloy (Neutral)</option>
+             <option value="echo">Echo (Male)</option>
+             <option value="shimmer">Shimmer (Female)</option>
+             <option value="ash">Ash (Deep)</option>
+             <option value="ballad">Ballad (Warm)</option>
+             <option value="coral">Coral (Bright)</option>
+             <option value="sage">Sage (Calm)</option>
+             <option value="verse">Verse (Crisp)</option>
+             <option value="browser">Browser Native (Free)</option>
+           </select>
         </div>
 
         <button class="voice-btn" id="voiceBtn" onmousedown="startListening()" onmouseup="stopListening()" ontouchstart="startListening()" ontouchend="stopListening()">
@@ -768,6 +773,7 @@ function getHTMLContent() {
     let articles = [];
     let currentIndex = 0;
     let isPlaying = false;
+    let isPaused = false;
     let currentAudio = null;
     let speechSynth = window.speechSynthesis;
     let recognition = null;
@@ -791,9 +797,9 @@ function getHTMLContent() {
       }
 
       // Set active buttons
-      document.querySelectorAll('.voice-option').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.voice === selectedVoice);
-      });
+      const voiceSelect = document.getElementById('voiceSelect');
+      if (voiceSelect) voiceSelect.value = selectedVoice;
+      
       document.querySelectorAll('.source-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.source === selectedSource);
       });
@@ -844,6 +850,7 @@ function getHTMLContent() {
         articles = data.articles || [];
         localStorage.setItem('articles', JSON.stringify(articles));
         currentIndex = 0;
+        stop(); // Reset player
 
         if (articles.length === 0) {
           showEmpty();
@@ -891,9 +898,6 @@ function getHTMLContent() {
     function setVoice(voice) {
       selectedVoice = voice;
       localStorage.setItem('voice', voice);
-      document.querySelectorAll('.voice-option').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.voice === voice);
-      });
       showToast('Voice: ' + voice);
     }
 
@@ -948,16 +952,29 @@ function getHTMLContent() {
 
     function play() {
       if (articles.length === 0) return;
+
+      // Resume if paused
+      if (isPaused) {
+        if (currentAudio) currentAudio.play();
+        else speechSynth.resume();
+        
+        isPaused = false;
+        isPlaying = true;
+        updatePlayButton();
+        return;
+      }
+
       const article = articles[currentIndex];
       const text = 'Next, from ' + article.source + '. ' + article.summary;
 
       isPlaying = true;
       updatePlayButton();
 
+      // Basic progress simulation (can be improved with real events)
       let startTime = Date.now();
       const estimatedDuration = text.length * 50;
       const progressInterval = setInterval(() => {
-        if (!isPlaying) { clearInterval(progressInterval); return; }
+        if (!isPlaying || isPaused) { clearInterval(progressInterval); return; }
         const progress = Math.min((Date.now() - startTime) / estimatedDuration * 100, 100);
         document.getElementById('progress').style.width = progress + '%';
       }, 100);
@@ -981,8 +998,31 @@ function getHTMLContent() {
       });
     }
 
-    function pause() { stop(); isPlaying = false; updatePlayButton(); }
-    function stop() { speechSynth.cancel(); if (currentAudio) { currentAudio.pause(); currentAudio = null; } }
+    function pause() {
+      if (!isPlaying) return;
+      
+      if (currentAudio) {
+        currentAudio.pause();
+      } else {
+        speechSynth.pause();
+      }
+      
+      isPaused = true;
+      isPlaying = false;
+      updatePlayButton();
+    }
+
+    function stop() {
+      speechSynth.cancel();
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+      isPaused = false;
+      isPlaying = false;
+      updatePlayButton();
+    }
+
     function replay() { stop(); document.getElementById('progress').style.width = '0%'; play(); }
 
     function skipArticle() {
