@@ -1111,8 +1111,8 @@ function getHTMLContent() {
     function openReader() {
       pause();
       // Try deep link first, then fallback to HTTPS which is a Universal Link
-      // readwise://reader/document/{id}
-      const deepLink = 'readwise://reader/document/' + articles[currentIndex].id;
+      // wiseread://open/private://read/{id}
+      const deepLink = 'wiseread://open/private://read/' + articles[currentIndex].id;
       const universalLink = articles[currentIndex].readwise_url;
       
       // On iOS/Mobile, try deep link
