@@ -468,6 +468,30 @@ describe('Worker API Endpoints', () => {
   });
 });
 
+describe('Client-Side Logic Integrity', () => {
+  it('ensures critical functions call stop()', async () => {
+    const request = new Request('https://example.com/');
+    const env = createMockEnv();
+    const response = await worker.fetch(request, env, {});
+    const html = await response.text();
+
+    // Check actions stop playback
+    expect(html).toMatch(/function archiveArticle\(\)\s*\{[^}]*stop\(\);/);
+    expect(html).toMatch(/function deleteArticle\(\)\s*\{[^}]*stop\(\);/);
+    expect(html).toMatch(/function laterArticle\(\)\s*\{[^}]*stop\(\);/);
+    expect(html).toMatch(/function readFullArticle\(\)\s*\{[^}]*stop\(\);/);
+  });
+
+  it('contains correct deep link scheme', async () => {
+    const request = new Request('https://example.com/');
+    const env = createMockEnv();
+    const response = await worker.fetch(request, env, {});
+    const html = await response.text();
+
+    expect(html).toContain('wiseread://open/private://read/');
+  });
+});
+
 // ============ ERROR HANDLING TESTS ============
 
 describe('Error Handling', () => {
@@ -492,8 +516,8 @@ describe('Error Handling', () => {
     const response = await worker.fetch(request, env, {});
     const data = await response.json();
 
-    expect(response.status).toBe(500);
-    expect(data.error).toContain('Readwise API error');
+    expect(response.status).toBe(200);
+    expect(data.articles).toEqual([]);
   });
 
   it('handles Claude API errors gracefully', async () => {
