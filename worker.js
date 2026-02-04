@@ -256,9 +256,11 @@ async function fetchAllReadwiseArticles(env, locationFilter) {
       const loc = (doc.location || '').toLowerCase();
 
       if (locationFilter === 'feed') {
-        return loc === 'new' || loc === 'feed';
+        // Feed = RSS/Newsletters only
+        return loc === 'feed';
       } else if (locationFilter === 'library') {
-        return loc === 'later' || loc === 'shortlist';
+        // Library = Inbox (new), Later, and Shortlist
+        return loc === 'new' || loc === 'later' || loc === 'shortlist';
       }
       return true;
     });
